@@ -4,15 +4,19 @@ import AppKit
 
 struct SettingsView: View {
     @ObservedObject private var state = AppState.shared
-    @State private var apiKey: String = KeychainStore.shared.get("anthropic-api-key") ?? ""
+    @ObservedObject private var runtimeManager = AppState.shared.agentRuntimeManager
+    @State private var apiKey: String = ""
+    @State private var openAIKey: String = ""
+    @State private var googleKey: String = ""
     @State private var launchAtStartup: Bool = (SMAppService.mainApp.status == .enabled)
     @State private var statusMessage: String = ""
     @State private var showDiff: Bool = false
     @State private var pendingHookJSON: String = ""
+    @State private var showGeminiHookDiff: Bool = false
+    @State private var pendingGeminiHookJSON: String = ""
+    @State private var showAntigravityHookDiff: Bool = false
+    @State private var pendingAntigravityHookJSON: String = ""
     @State private var hookNeedsUpdate: Bool = HookServer.hooksNeedUpdate()
-    #if APPSTORE
-    @State private var claudeAccessGranted: Bool = (UserDefaults.standard.data(forKey: "claudeDirectoryBookmark") != nil)
-    #endif
 
     // Integration keys
     @State private var resendKey: String    = KeychainStore.shared.get("resend-api-key")  ?? ""
@@ -49,16 +53,81 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
 
-                // MARK: API
-                GroupBox("Anthropic API") {
+                // MARK: AI providers
+                GroupBox("AI Providers") {
                     VStack(alignment: .leading, spacing: 8) {
-                        SecureField("API key (sk-ant-…)", text: $apiKey)
+                        Text("Anthropic")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(KeychainStore.shared.get("anthropic-api-key") == nil ? "Not configured" : "Connected · API key")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        SecureField("New API key (sk-ant-…)", text: $apiKey)
                             .textFieldStyle(.roundedBorder)
-                        Button("Save") {
+                        Button("Save Anthropic key") {
+                            guard !apiKey.isEmpty else { return }
                             KeychainStore.shared.set("anthropic-api-key", value: apiKey)
+                            apiKey = ""
+                            InternalChatService.shared.loadModels(forceRefresh: true)
                             statusMessage = "✓ Key saved."
                         }
                         .buttonStyle(.borderedProminent)
+
+                        Divider().padding(.vertical, 4)
+
+                        Text("OpenAI")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(KeychainStore.shared.get("openai-api-key") == nil ? "Not configured" : "Connected · API key")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        SecureField("New API key (sk-…)", text: $openAIKey)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Save OpenAI key") {
+                            guard !openAIKey.isEmpty else { return }
+                            KeychainStore.shared.set("openai-api-key", value: openAIKey)
+                            openAIKey = ""
+                            InternalChatService.shared.loadModels(forceRefresh: true)
+                            statusMessage = "✓ OpenAI key saved."
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Divider().padding(.vertical, 4)
+
+                        Text("Google Gemini")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(KeychainStore.shared.get("google-api-key") == nil ? "Not configured" : "Connected · API key")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        SecureField("New Gemini API key", text: $googleKey)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Save Gemini key") {
+                            guard !googleKey.isEmpty else { return }
+                            KeychainStore.shared.set("google-api-key", value: googleKey)
+                            googleKey = ""
+                            InternalChatService.shared.loadModels(forceRefresh: true)
+                            statusMessage = "✓ Gemini key saved."
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(6)
+                }
+
+                // MARK: Agent runtimes
+                GroupBox("Agent runtimes") {
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(codexRuntimeColor)
+                            .frame(width: 10, height: 10)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Codex")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text(codexRuntimeDetail)
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Text("\(codexSessionCount) session\(codexSessionCount == 1 ? "" : "s")")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
                     }
                     .padding(6)
                 }
@@ -81,22 +150,14 @@ struct SettingsView: View {
                             #endif
                         }
                         #if APPSTORE
-                        if claudeAccessGranted {
-                            Text("~/.claude/coucou/nb-hook")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.secondary)
-                            HStack(spacing: 10) {
-                                Button("Install hooks") { installHooksAppStore() }
-                                    .buttonStyle(.borderedProminent)
-                                Button("Uninstall") { uninstallHooksAppStore() }
-                                    .buttonStyle(.bordered)
-                            }
-                        } else {
-                            Text("Choose your ~/.claude folder so Coucou can add its hooks.")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                            Button("Choose .claude folder…") { chooseClaudeFolder() }
+                        Text("~/.claude/coucou/nb-hook")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                        HStack(spacing: 10) {
+                            Button("Install hooks") { installHooksAppStore() }
                                 .buttonStyle(.borderedProminent)
+                            Button("Uninstall") { uninstallHooksAppStore() }
+                                .buttonStyle(.bordered)
                         }
                         #else
                         Text("nb-hook : \(HookServer.hookScriptPath)")
@@ -110,6 +171,7 @@ struct SettingsView: View {
                         }
                         #endif
 
+                        #if !APPSTORE
                         if showDiff {
                             ScrollView {
                                 Text(pendingHookJSON)
@@ -121,17 +183,103 @@ struct SettingsView: View {
                             .cornerRadius(6)
 
                             HStack {
-                                #if APPSTORE
-                                Button("Confirm & write") { confirmInstallAppStore() }
-                                    .buttonStyle(.borderedProminent)
-                                #else
                                 Button("Confirm & write") { confirmInstall() }
                                     .buttonStyle(.borderedProminent)
-                                #endif
                                 Button("Cancel") { showDiff = false; pendingHookJSON = "" }
                                     .buttonStyle(.bordered)
                             }
                         }
+                        #endif
+                    }
+                    .padding(6)
+                }
+
+                GroupBox("Antigravity CLI Hooks") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Observe Antigravity sessions without changing its permission decisions.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        #if APPSTORE
+                        Text("Antigravity hook installation is available in the direct-download build.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        #else
+                        Text("~/.gemini/config/hooks.json")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                        HStack(spacing: 10) {
+                            Button("Install hooks") { installAntigravityHooks() }
+                                .buttonStyle(.borderedProminent)
+                            Button("Uninstall") { uninstallAntigravityHooks() }
+                                .buttonStyle(.bordered)
+                        }
+
+                        if showAntigravityHookDiff {
+                            ScrollView {
+                                Text(pendingAntigravityHookJSON)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(height: 140)
+                            .background(Color(NSColor.textBackgroundColor))
+                            .cornerRadius(6)
+
+                            HStack {
+                                Button("Confirm & write") { confirmAntigravityHooks() }
+                                    .buttonStyle(.borderedProminent)
+                                Button("Cancel") {
+                                    showAntigravityHookDiff = false
+                                    pendingAntigravityHookJSON = ""
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        #endif
+                    }
+                    .padding(6)
+                }
+
+                GroupBox("Gemini CLI Hooks (Legacy)") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("For enterprise/API-key Gemini CLI installations that still support the legacy runtime.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        #if APPSTORE
+                        Text("Gemini CLI hook installation is available in the direct-download build.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        #else
+                        Text("~/.gemini/settings.json")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                        HStack(spacing: 10) {
+                            Button("Install hooks") { installGeminiHooks() }
+                                .buttonStyle(.borderedProminent)
+                            Button("Uninstall") { uninstallGeminiHooks() }
+                                .buttonStyle(.bordered)
+                        }
+
+                        if showGeminiHookDiff {
+                            ScrollView {
+                                Text(pendingGeminiHookJSON)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(height: 140)
+                            .background(Color(NSColor.textBackgroundColor))
+                            .cornerRadius(6)
+
+                            HStack {
+                                Button("Confirm & write") { confirmGeminiHooks() }
+                                    .buttonStyle(.borderedProminent)
+                                Button("Cancel") {
+                                    showGeminiHookDiff = false
+                                    pendingGeminiHookJSON = ""
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        #endif
                     }
                     .padding(6)
                 }
@@ -276,7 +424,7 @@ struct SettingsView: View {
                 GroupBox("Active pills") {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
-                            Text("VS Code")
+                            Text("Claude Code")
                                 .font(.system(size: 12, weight: .semibold))
                             Circle().fill(Color(hex: "#F5F6F8")).frame(width: 8, height: 8)
                             Spacer()
@@ -353,7 +501,40 @@ struct SettingsView: View {
             }
             .padding(20)
         }
-        .frame(width: 480, height: 720)
+        .frame(minWidth: 420, maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
+    }
+
+    private var codexSessionCount: Int {
+        runtimeManager.sessions.values.lazy.filter { $0.runtime == .codex }.count
+    }
+
+    private var codexRuntimeColor: Color {
+        switch runtimeManager.availability[.codex] {
+        case .available:
+            Color(hex: "#5EA2FF")
+        case .disconnected:
+            .orange
+        default:
+            .secondary
+        }
+    }
+
+    private var codexRuntimeDetail: String {
+        switch runtimeManager.availability[.codex] {
+        case .available(let version):
+            return version.map { "Connected · \($0)" } ?? "Connected"
+        case .disconnected(let version, let reason):
+            let label = version.map { "Installed · \($0) · disconnected" } ?? "Installed · disconnected"
+            return reason.map { "\(label) · \($0)" } ?? label
+        case .unavailable(let reason):
+            return reason ?? "Unavailable"
+        case .authenticationRequired(let reason):
+            return reason ?? "Authentication required"
+        case .unsupported(let reason):
+            return reason
+        case nil:
+            return "Detecting Codex CLI…"
+        }
     }
 
     // MARK: - Actions
@@ -371,86 +552,48 @@ struct SettingsView: View {
     // MARK: - App Store: hooks via NSOpenPanel + security-scoped bookmark
 
     #if APPSTORE
-    private func chooseClaudeFolder() {
+    /// Opens NSOpenPanel to select ~/.claude, then writes hooks directly.
+    /// NSOpenPanel grants sandbox access immediately — no security-scoped bookmark needed.
+    private func pickClaudeFolder(prompt: String) -> URL? {
         let panel = NSOpenPanel()
-        panel.message = "Choose your .claude folder so Coucou can add its hooks"
-        panel.prompt = "Choose"
+        panel.message = "Select your .claude folder (press ⇧⌘. to show hidden files)"
+        panel.prompt = prompt
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-        if panel.runModal() == .OK, let url = panel.url {
-            do {
-                let data = try url.bookmarkData(
-                    options: .withSecurityScope,
-                    includingResourceValuesForKeys: nil,
-                    relativeTo: nil
-                )
-                UserDefaults.standard.set(data, forKey: "claudeDirectoryBookmark")
-                claudeAccessGranted = true
-                statusMessage = "✓ .claude folder access granted."
-            } catch {
-                statusMessage = "❌ Bookmark error: \(error.localizedDescription)"
-            }
-        }
-    }
-
-    private func resolveClaudeBookmark() -> URL? {
-        guard let data = UserDefaults.standard.data(forKey: "claudeDirectoryBookmark") else { return nil }
-        var isStale = false
-        guard let url = try? URL(resolvingBookmarkData: data,
-                                  options: .withSecurityScope,
-                                  relativeTo: nil,
-                                  bookmarkDataIsStale: &isStale) else { return nil }
-        if isStale {
-            // Re-prompt user if bookmark is stale
-            claudeAccessGranted = false
-            UserDefaults.standard.removeObject(forKey: "claudeDirectoryBookmark")
+        panel.showsHiddenFiles = true
+        // getpwuid bypasses CFFIXED_USER_HOME and always returns the real user home
+        let realHomePath = getpwuid(getuid()).flatMap { String(cString: $0.pointee.pw_dir, encoding: .utf8) }
+            ?? "/Users/\(NSUserName())"
+        panel.directoryURL = URL(fileURLWithPath: realHomePath)
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        guard url.lastPathComponent == ".claude" else {
+            statusMessage = "❌ Select the .claude folder (hidden, in your Home directory)."
             return nil
         }
         return url
     }
 
     private func installHooksAppStore() {
-        guard let claudeURL = resolveClaudeBookmark() else {
-            claudeAccessGranted = false
-            statusMessage = "❌ .claude folder access lost — choose the folder again."
-            return
-        }
+        guard let claudeURL = pickClaudeFolder(prompt: "Select") else { return }
+        let alert = NSAlert()
+        alert.messageText = "Install Coucou hooks in ~/.claude?"
+        alert.informativeText = "Will write:\n• ~/.claude/coucou/nb-hook\n• ~/.claude/settings.json (backup created first)"
+        alert.addButton(withTitle: "Install")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .informational
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
-            let accessing = claudeURL.startAccessingSecurityScopedResource()
-            defer { if accessing { claudeURL.stopAccessingSecurityScopedResource() } }
-            pendingHookJSON = try HookServer.shared.previewClaudeHooksAppStore(claudeURL: claudeURL)
-            showDiff = true
-            statusMessage = "Review the JSON below before confirming."
+            try HookServer.shared.installAndWriteClaudeHooksAppStore(claudeURL: claudeURL)
+            hookNeedsUpdate = false
+            statusMessage = "✓ Hooks installed — restart VS Code to activate."
         } catch {
             statusMessage = "❌ \(error.localizedDescription)"
         }
     }
 
-    private func confirmInstallAppStore() {
-        guard let claudeURL = resolveClaudeBookmark() else {
-            claudeAccessGranted = false
-            statusMessage = "❌ .claude folder access lost."
-            return
-        }
-        do {
-            try HookServer.shared.writeClaudeHooksAppStore(claudeURL: claudeURL)
-            showDiff = false
-            statusMessage = "✓ Hooks installed in ~/.claude/settings.json"
-            pendingHookJSON = ""
-            hookNeedsUpdate = false
-        } catch {
-            statusMessage = "❌ Write error: \(error.localizedDescription)"
-        }
-    }
-
     private func uninstallHooksAppStore() {
-        guard let claudeURL = resolveClaudeBookmark() else {
-            claudeAccessGranted = false
-            statusMessage = "❌ .claude folder access lost."
-            return
-        }
+        guard let claudeURL = pickClaudeFolder(prompt: "Select") else { return }
         do {
             try HookServer.shared.uninstallClaudeHooksAppStore(claudeURL: claudeURL)
             statusMessage = "✓ Hooks removed."
@@ -486,6 +629,66 @@ struct SettingsView: View {
         do {
             try HookServer.shared.uninstallClaudeHooks()
             statusMessage = "✓ Hooks removed."
+        } catch {
+            statusMessage = "❌ \(error.localizedDescription)"
+        }
+    }
+
+    private func installGeminiHooks() {
+        do {
+            pendingGeminiHookJSON = try HookServer.shared.previewGeminiHooks()
+            showGeminiHookDiff = true
+            statusMessage = "Review the Gemini CLI JSON below before confirming."
+        } catch {
+            statusMessage = "❌ \(error.localizedDescription)"
+        }
+    }
+
+    private func installAntigravityHooks() {
+        do {
+            pendingAntigravityHookJSON = try HookServer.shared.previewAntigravityHooks()
+            showAntigravityHookDiff = true
+            statusMessage = "Review the Antigravity hooks JSON below before confirming."
+        } catch {
+            statusMessage = "❌ \(error.localizedDescription)"
+        }
+    }
+
+    private func confirmAntigravityHooks() {
+        do {
+            try HookServer.shared.writeAntigravityHooks()
+            showAntigravityHookDiff = false
+            pendingAntigravityHookJSON = ""
+            statusMessage = "✓ Antigravity hooks installed."
+        } catch {
+            statusMessage = "❌ Write error: \(error.localizedDescription)"
+        }
+    }
+
+    private func uninstallAntigravityHooks() {
+        do {
+            try HookServer.shared.uninstallAntigravityHooks()
+            statusMessage = "✓ Antigravity hooks removed."
+        } catch {
+            statusMessage = "❌ \(error.localizedDescription)"
+        }
+    }
+
+    private func confirmGeminiHooks() {
+        do {
+            try HookServer.shared.writeGeminiHooks()
+            showGeminiHookDiff = false
+            pendingGeminiHookJSON = ""
+            statusMessage = "✓ Gemini CLI hooks installed."
+        } catch {
+            statusMessage = "❌ Write error: \(error.localizedDescription)"
+        }
+    }
+
+    private func uninstallGeminiHooks() {
+        do {
+            try HookServer.shared.uninstallGeminiHooks()
+            statusMessage = "✓ Gemini CLI hooks removed."
         } catch {
             statusMessage = "❌ \(error.localizedDescription)"
         }

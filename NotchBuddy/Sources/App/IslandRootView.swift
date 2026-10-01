@@ -14,6 +14,9 @@ struct IslandRootView: View {
             IslandContainer(state: state)
                 .frame(maxWidth: .infinity, alignment: .center)
         }
+        // The island is always a dark surface, independently of the system appearance.
+        // This also keeps native controls (Picker/Menu/TextField placeholders) legible.
+        .environment(\.colorScheme, .dark)
         .ignoresSafeArea()
     }
 }
@@ -95,6 +98,12 @@ struct IslandContainer: View {
             // fire from the current position (e.g. choose at 60,101) when canvas deactivates.
             // Hidden during upload canvas or greeting (both draw their own Mochi).
             BotPlacement(state: state, islandW: islandWidth, islandH: islandHeight)
+                // Keep idle animations inside the resting strip. Expanded views
+                // retain the panel's full height for particles and hands.
+                .mask(alignment: .topLeading) {
+                    Rectangle().frame(width: islandWidth,
+                                      height: state.mode == .expanded ? 320 : islandHeight)
+                }
                 .opacity(uploadActive || greetingActive ? 0 : 1)
                 .animation(.easeInOut(duration: 0.25), value: uploadActive || greetingActive)
 
@@ -103,6 +112,7 @@ struct IslandContainer: View {
             Group {
                 if state.mode == .compact {
                     CompactMiniGrid(state: state)
+                        .scaleEffect(IslandRestingLayout(width: islandWidth, height: islandHeight).miniGridScale)
                         .position(x: islandWidth - 40, y: islandHeight / 2)
                         .transition(.opacity)
                 }
@@ -186,7 +196,7 @@ struct IslandShape: Shape {
     }
 
     func path(in rect: CGRect) -> Path {
-        let cr = max(0, cornerRadius)
+        let cr = min(max(0, cornerRadius), min(width / 2, height / 2))
         var p  = Path()
 
         if topRadius >= 0 {
@@ -251,7 +261,7 @@ struct BotPlacement: View {
     let islandH: CGFloat
 
     var body: some View {
-        let (cx, cy, diameter, opacity) = botPosition(mode: state.mode, view: state.view, islandW: islandW, islandH: islandH, uploadProgress: state.uploadProgress)
+        let (cx, cy, diameter, opacity) = botPosition(mode: state.mode, view: state.view, islandW: islandW, islandH: islandH, uploadProgress: state.uploadProgress, hasNotch: state.hasNotch)
         let canvasSize = diameter / 0.6
         let overhang: CGFloat = 40
         let isUploading = state.view == .uploading
@@ -338,10 +348,13 @@ struct BotPlacement: View {
     }
 }
 
-func botPosition(mode: IslandMode, view: IslandView, islandW: CGFloat, islandH: CGFloat, uploadProgress: Double) -> (CGFloat, CGFloat, CGFloat, Double) {
+func botPosition(mode: IslandMode, view: IslandView, islandW: CGFloat, islandH: CGFloat, uploadProgress: Double, hasNotch: Bool = true) -> (CGFloat, CGFloat, CGFloat, Double) {
+    let resting = IslandRestingLayout(width: islandW, height: islandH)
     switch mode {
-    case .hidden:   return (46, 16, 6, 0)
-    case .compact:  return (40, 16, 20, 1)
+    case .hidden:
+        return hasNotch ? (46, 16, 6, 0)
+            : (islandW / 2, resting.botCenterY, resting.botDiameter, 1)
+    case .compact: return (40, resting.botCenterY, resting.botDiameter, 1)
     case .expanded:
         let layout = IslandConst.viewLayouts[view]!
         let diameter = layout.botDiameter
@@ -427,7 +440,7 @@ struct IslandContentView: View {
                     // Views that fill available height instead of the fixed 98pt content frame:
                     // chat (prompt) is always flexible; mail is flexible only when active so
                     // it doesn't push the ZStack taller when inactive.
-                    let isTall = v == .prompt || (v == .mail && active)
+                    let isTall = v == .prompt || v == .agentSession || (v == .mail && active)
                     let anim: Animation = active
                         ? .spring(response: 0.4, dampingFraction: 0.8).delay(0.16)
                         : .easeIn(duration: 0.16)
@@ -444,7 +457,7 @@ struct IslandContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, 10)
         }
-        .padding(.top, 8)
+        .padding(.top, 10)
         .padding(.bottom, 10)
         .foregroundColor(Color(hex: "#F5F6F8"))
     }
@@ -533,18 +546,17 @@ struct TabButton: View {
     }
 }
 
-// MARK: - Compact mini mochi grid (2×2 to the right of the notch)
+// MARK: - Compact runtime indicators
 
 struct CompactMiniGrid: View {
     @ObservedObject var state: AppState
 
     private var others: [AgentTask] {
-        Array(state.tasks.filter { $0.id != state.focusId }.prefix(4))
+        Array(state.tasks.filter { $0.agentSessionID != nil }.prefix(2))
     }
 
     var body: some View {
-        let cols = [GridItem(.fixed(12), spacing: 4), GridItem(.fixed(12), spacing: 4)]
-        LazyVGrid(columns: cols, spacing: 4) {
+        HStack(spacing: 3) {
             ForEach(others) { task in
                 MiniBotCanvasView(task: task)
                     .frame(width: 12 / 0.6, height: 12 / 0.6)

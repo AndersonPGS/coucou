@@ -2,6 +2,8 @@
 
 Règle d'or : **vérifier la doc officielle au moment d'implémenter**. Les formats ci-dessous sont le plan, pas une garantie. Sources à relire :
 - Hooks Claude Code : https://code.claude.com/docs/en/hooks
+- Hooks Antigravity : https://antigravity.google/docs/hooks
+- CLI Antigravity : https://antigravity.google/docs/cli/install/
 - API Claude (Messages, outil de recherche web, modèles) : https://docs.claude.com/en/api/overview
 - API publique n8n : `{URL de l'instance}/api/v1/docs` (playground de l'instance de Louis)
 
@@ -17,9 +19,10 @@ claude (terminal, VS Code, app Claude)
                          ◄─ décision (pour PermissionRequest)
 ```
 - `nb-hook` : cible séparée dans le projet, copiée dans `~/Library/Application Support/NotchBuddy/bin/nb-hook` au premier lancement.
-- Socket : `~/Library/Application Support/NotchBuddy/nb.sock`.
-- `nb-hook <Event>` lit le JSON du hook sur stdin, ajoute le contexte du terminal (`TERM_PROGRAM`, `ITERM_SESSION_ID`, `TERM_SESSION_ID`, `__CFBundleIdentifier`, le tty trouvé en remontant les processus parents, `cwd`), l'envoie à l'app.
+- Socket : `~/Library/Application Support/NotchBuddy/nb.sock` (version GitHub) ou `~/Library/Containers/fr.louisraille.Coucou/Data/nb.sock` (version App Store). Dossier en 0700, socket en 0600. Connexions du même utilisateur seulement (vérification `getpeereid`). 1 Mio et 5 s maximum par message, 32 connexions simultanées.
+- `nb-hook [--agent <nom>] <Event>` lit le JSON du hook sur stdin, ajoute le contexte du terminal (`TERM_PROGRAM`, `ITERM_SESSION_ID`, `TERM_SESSION_ID`, `__CFBundleIdentifier`, le tty trouvé en remontant les processus parents, `cwd`) et, si `--agent` est fourni, le champ `coucou_agent`, puis l'envoie à l'app.
 - **Si l'app ne répond pas en 300 ms, `nb-hook` sort en code 0 sans rien écrire** : Claude Code continue normalement. Jamais de blocage.
+- Champ optionnel `coucou_agent` : nom en minuscules, chiffres et tirets, 24 caractères au plus. Si absent ou invalide, l'événement va dans la pastille Claude. Voir `docs/AGENTS.md` pour les autres agents.
 
 ### Événements à brancher et état du bonhomme
 | Hook | Effet dans l'app |
@@ -64,6 +67,19 @@ Demande l'autorisation Automatisation la première fois (normal).
 3. **Fusionner** : ajouter les hooks Notch Buddy sans toucher aux hooks existants. Chemin de `nb-hook` entre guillemets (il contient un espace).
 4. Montrer le diff à Louis, attendre son OK, écrire.
 5. Bouton « Désinstaller les hooks » dans les réglages qui retire uniquement les entrées Notch Buddy.
+
+## 1 bis. Antigravity CLI
+
+Les comptes Google individuels utilisent désormais `agy`; l'ancien Gemini CLI reste pris en charge comme intégration héritée pour les licences et clés compatibles.
+
+- Exécutable détecté : `agy` dans le `PATH`, `~/.local/bin`, Homebrew ou le chemin défini par `ANTIGRAVITY_EXECUTABLE`.
+- Hooks globaux : `~/.gemini/config/hooks.json`.
+- Identité de session : `conversationId`; espace de travail : premier élément de `workspacePaths`.
+- Événements observés : `PreInvocation`, `PostInvocation`, `PostToolUse` et `Stop`.
+- `PreToolUse` n'est pas installé par Coucou : son verdict obligatoire modifierait les décisions de permission natives. Coucou ne doit jamais autoriser implicitement un outil.
+- Chaque commande ajoute `COUCOU_RUNTIME=antigravity` et `COUCOU_HOOK_EVENT=<événement>` avant d'appeler `nb-hook`.
+- Comme pour Claude et Gemini CLI, une indisponibilité du socket ne bloque pas l'agent et le relais renvoie un objet JSON vide.
+- Installation et désinstallation suivent la même discipline : fusion, prévisualisation explicite, détection d'une modification concurrente, sauvegarde datée et suppression des seules entrées Coucou.
 
 ---
 
@@ -111,7 +127,8 @@ Permissions : Enregistrement de l'écran (capture) et Automatisation (navigateur
 ## 5. API Claude (recherche)
 
 - `POST https://api.anthropic.com/v1/messages`, en-têtes `x-api-key`, `anthropic-version`, `content-type: application/json` (versions à vérifier dans la doc).
-- Modèle par défaut : `claude-sonnet-5`, réglable dans les réglages. Vérifier la liste des modèles disponibles dans la doc.
+- Modèle par défaut : `claude-sonnet-4-6`, choisi dans Settings → Anthropic API. La liste est récupérée au chargement des réglages via `GET /v1/models?limit=100` (en-têtes `x-api-key` et `anthropic-version: 2023-06-01`) ; si l'appel échoue ou qu'il n'y a pas de clé, une liste de secours est utilisée (`claude-sonnet-4-6`, `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-haiku-4-5-20251001`). Un champ libre permet d'entrer n'importe quel identifiant. Si le modèle sauvegardé n'est pas dans la liste, le sélecteur reste sur « Custom… ».
+- Erreurs de l'API : affiche `error.message` au lieu du JSON brut. Pour un `not_found_error`, affiche « Model not found: \<id\>. Pick another one in Settings. »
 - Outil de recherche web côté serveur de l'API : l'identifiant de type à jour est dans la doc (au moment d'écrire, `web_search_20250305`) ; `max_uses` 5.
 - Prompt système (français) : répondre court, pour un affichage dans le notch, au format JSON strict :
   ```json
@@ -120,7 +137,7 @@ Permissions : Enregistrement de l'écran (capture) et Automatisation (navigateur
   3 items maximum. Si le JSON est invalide : afficher le texte brut (3 lignes max) dans la vue `result`.
 - Contenu du message utilisateur : capture (bloc image) + « URL : … / Titre : … / Demande : … », ou fichier (§3) + demande, ou demande seule (onglet Demander).
 - Pendant l'appel : état `searching`, vue `searching`, texte scintillant. Réponse : état `finished`, vue `result`, émote Fier, son `finish`.
-- Boutons du résultat : « Ouvrir » (premier lien), « Copier » (texte), « Fermer ».
+- Boutons du résultat : « Ouvrir » (premier lien, seulement s'il est en http ou https ; sinon le bouton est grisé), « Copier » (texte), « Fermer ».
 - Erreur réseau ou clé invalide : état `error`, vue `note` avec la raison en une phrase et « Ouvre les réglages pour vérifier la clé ».
 - Micro (bouton du champ) : dictée `SFSpeechRecognizer` en `fr-FR`, sur l'appareil si possible. Optionnel (M9). Si la permission est refusée, masquer le bouton.
 

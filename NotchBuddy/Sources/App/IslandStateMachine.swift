@@ -29,6 +29,7 @@ final class IslandStateMachine {
     private var petitHideWork: DispatchWorkItem?
     private var homeCollapseWork: DispatchWorkItem?
     private var greetCollapseWork: DispatchWorkItem?
+    private var hoverExpandWork: DispatchWorkItem?
 
     // MARK: – Inputs
 
@@ -47,6 +48,13 @@ final class IslandStateMachine {
         case .petit:
             petitHideWork?.cancel()
             petitHideWork = nil
+            hoverExpandWork?.cancel()
+            let item = DispatchWorkItem { [weak self] in
+                guard let self, self.state == .petit else { return }
+                self.transition(to: .home)
+            }
+            hoverExpandWork = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: item)
         case .home:
             homeCollapseWork?.cancel()
             homeCollapseWork = nil
@@ -62,6 +70,8 @@ final class IslandStateMachine {
         case .hidden:
             break
         case .petit:
+            hoverExpandWork?.cancel()
+            hoverExpandWork = nil
             schedulePetitHide()
         case .home:
             scheduleHomeCollapse()
@@ -72,11 +82,31 @@ final class IslandStateMachine {
         }
     }
 
-    /// Compact island clicked
+    /// Compact island clicked.
+    /// Also accepts `.hidden`: after an alert the island can be on screen while the
+    /// FSM never saw the mouse enter (it was already there), and the click must still open it.
     func click() {
-        guard state == .petit else { return }
+        guard state == .petit || state == .hidden else { return }
         cancelTimers()
         transition(to: .home)
+    }
+
+    /// The app hid the island on its own (e.g. `AppState.syncMode()` when the last
+    /// task ends). Mirror it without side effects, so the next hover peeks again
+    /// instead of being swallowed by a FSM that still thinks the island is `.petit`.
+    func hiddenExternally() {
+        guard state == .petit else { return }
+        cancelTimers()
+        state = .hidden
+    }
+
+    /// The app folded the island itself (Escape, Settings, OK button, auto-close).
+    /// Move to `.petit` right away so hover and click keep working; waiting for the
+    /// 15 s home timer left the island compact on screen while the FSM still said `.home`.
+    func collapse() {
+        guard state == .home || state == .coucou else { return }
+        cancelTimers()
+        transition(to: .petit)
     }
 
     /// Greeting animation finished (called at T.end ≈ 4.60 s).
@@ -133,6 +163,7 @@ final class IslandStateMachine {
         petitHideWork?.cancel();    petitHideWork = nil
         homeCollapseWork?.cancel(); homeCollapseWork = nil
         greetCollapseWork?.cancel(); greetCollapseWork = nil
+        hoverExpandWork?.cancel();   hoverExpandWork = nil
     }
 
     private func transition(to new: State) {
