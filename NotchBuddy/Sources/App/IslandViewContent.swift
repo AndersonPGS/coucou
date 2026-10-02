@@ -1958,6 +1958,9 @@ struct AgentSessionView: View {
                 header
                 Divider().overlay(Color.white.opacity(0.07))
                 conversation
+                if let errorMessage, !messages.isEmpty {
+                    conversationError(errorMessage)
+                }
                 composer
             }
             .padding(.horizontal, 14)
@@ -2173,6 +2176,29 @@ struct AgentSessionView: View {
         }
     }
 
+    private func conversationError(_ message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 9))
+                .foregroundColor(Color(hex: "#FF8D97"))
+            Text(message)
+                .font(.system(size: 10.5))
+                .foregroundColor(Color(hex: "#FFB0B7"))
+                .lineLimit(2)
+            Spacer(minLength: 4)
+            if let session {
+                Button("Open in Codex") { openInCodex(session) }
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundColor(Color(hex: "#8EBBFF"))
+                    .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color(hex: "#421C22").opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
     private var canSend: Bool {
         !isSending && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -2199,6 +2225,11 @@ struct AgentSessionView: View {
             isSending = false
             promptFocused = true
         }
+    }
+
+    private func openInCodex(_ session: AgentSession) {
+        guard let url = URL(string: "codex://threads/\(session.nativeSessionID)") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
@@ -3097,8 +3128,8 @@ struct N8nDetailView: View {
 struct TickerView: View {
     let task: AgentTask?
 
-    @State private var rowA: String = "…"   // completed (above, left-shifted)
-    @State private var rowB: String = "…"   // current (below) → animates diagonally up-left
+    @State private var rowA: String = ""    // completed (above, left-shifted)
+    @State private var rowB: String = ""    // current (below) → animates diagonally up-left
     @State private var rowC: String = ""    // incoming current — slides in from below
 
     @State private var rowAOffset: CGFloat = 0
@@ -3115,7 +3146,7 @@ struct TickerView: View {
 
     var steps: [String] {
         let raw = task?.steps ?? []
-        return raw.isEmpty ? ["…"] : raw
+        return raw.isEmpty ? ["No recent activity"] : raw
     }
 
     var body: some View {
@@ -3153,16 +3184,21 @@ struct TickerView: View {
             let idx = task?.stepIndex ?? -1
             displayIndex = idx
             if idx >= 0, !steps.isEmpty {
-                rowA = idx > 0 ? steps[max(0, idx - 1)] : "…"
+                rowA = idx > 0 ? steps[max(0, idx - 1)] : ""
                 rowB = steps[min(idx, steps.count - 1)]
             }
         }
-        .onChange(of: task?.steps.count) { _, _ in
+        .onChange(of: task?.steps) { _, _ in
             guard let task, !task.steps.isEmpty, !isTransitioning else { return }
             let newIdx = task.stepIndex
             if displayIndex < 0 {
                 displayIndex = newIdx
-                rowA = newIdx > 0 ? steps[max(0, newIdx - 1)] : "…"
+                rowA = newIdx > 0 ? steps[max(0, newIdx - 1)] : ""
+                rowB = steps[min(newIdx, steps.count - 1)]
+                return
+            }
+            if newIdx == displayIndex {
+                rowA = newIdx > 0 ? steps[max(0, newIdx - 1)] : ""
                 rowB = steps[min(newIdx, steps.count - 1)]
                 return
             }

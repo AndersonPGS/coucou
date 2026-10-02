@@ -364,7 +364,15 @@ final class AppState: ObservableObject {
         tasks[idx].state = selected.state.botState
         tasks[idx].name = selected.displayTitle
         tasks[idx].sessionCwd = selected.workspace?.path
-        tasks[idx].steps = selected.latestActivity.map { [$0.title] } ?? []
+        if let activity = selected.latestActivity?.title, !activity.isEmpty {
+            tasks[idx].steps = [activity]
+        } else if selected.state == .working {
+            tasks[idx].steps = ["Codex is working"]
+        } else if selected.state == .disconnected {
+            tasks[idx].steps = ["Saved chat · open to view or continue"]
+        } else {
+            tasks[idx].steps = ["Open chat to view the conversation"]
+        }
         tasks[idx].stepIndex = 0
         if selected.pendingApproval != nil {
             tasks[idx].pillBadge = .approval

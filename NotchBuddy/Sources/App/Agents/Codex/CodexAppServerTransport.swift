@@ -19,7 +19,11 @@ enum CodexAppServerError: LocalizedError {
         case .requestTimedOut(let method):
             "Codex took too long to answer \(method). Try opening the chat again."
         case .server(_, let message):
-            message
+            if message.localizedCaseInsensitiveContains("active writer") {
+                "This chat is already open in Codex Desktop. Continue it there, or close it there before resuming it in Coucou."
+            } else {
+                message
+            }
         case .terminated(let status):
             "Codex app-server exited with status \(status)"
         }

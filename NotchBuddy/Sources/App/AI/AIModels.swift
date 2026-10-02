@@ -286,9 +286,15 @@ struct AgentConversationMessage: Identifiable, Codable, Hashable, Sendable {
 }
 
 extension AgentSession {
-    /// A human title for the conversation. Codex's preview is the actual chat subject;
-    /// the working-directory name is only a fallback and must not masquerade as the title.
+    /// A human title for the conversation. Prefer the runtime's explicit title, then derive one
+    /// from the preview. The working-directory name is only a last-resort fallback.
     var displayTitle: String {
+        if let name = metadata["name"]?.stringValue {
+            let collapsed = name
+                .split(whereSeparator: \Character.isWhitespace)
+                .joined(separator: " ")
+            if !collapsed.isEmpty { return collapsed }
+        }
         if let preview = metadata["preview"]?.stringValue {
             let titleSource: Substring
             if let requestMarker = preview.range(of: "## My request:", options: .caseInsensitive) {

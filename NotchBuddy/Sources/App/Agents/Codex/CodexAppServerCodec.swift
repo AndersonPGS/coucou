@@ -75,8 +75,11 @@ enum CodexAppServerCodec {
             startedAt: createdAt,
             updatedAt: updatedAt,
             metadata: [
+                "name": thread["name"] ?? .string(""),
                 "preview": thread["preview"] ?? .string(""),
                 "modelProvider": thread["modelProvider"] ?? .string("openai"),
+                "historyMode": thread["historyMode"] ?? .string(""),
+                "source": thread["source"] ?? .string(""),
             ]
         )
     }

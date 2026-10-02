@@ -1095,6 +1095,40 @@ final class AgentSessionReducerTests: XCTestCase {
         XCTAssertEqual(messages.first?.createdAt, Date(timeIntervalSince1970: 2_000))
     }
 
+    func testCodexConversationParserNormalizesNewestFirstTurnPage() {
+        let response = JSONValue.object([
+            "data": .array([
+                .object([
+                    "startedAt": .number(2_100),
+                    "items": .array([
+                        .object([
+                            "id": .string("agent-new"),
+                            "type": .string("agentMessage"),
+                            "text": .string("Newest reply"),
+                        ]),
+                    ]),
+                ]),
+                .object([
+                    "startedAt": .number(2_000),
+                    "items": .array([
+                        .object([
+                            "id": .string("user-old"),
+                            "type": .string("userMessage"),
+                            "content": .array([
+                                .object(["type": .string("text"), "text": .string("Earlier prompt")]),
+                            ]),
+                        ]),
+                    ]),
+                ]),
+            ]),
+        ])
+
+        let messages = CodexAgentRuntimeAdapter.conversationMessages(from: response)
+
+        XCTAssertEqual(messages.map(\.id), ["user-old", "agent-new"])
+        XCTAssertEqual(messages.map(\.content), ["Earlier prompt", "Newest reply"])
+    }
+
     func testCompactIslandOnlyAddsSmallRuntimeIndicatorWidth() {
         let size = islandSize(mode: .compact, view: .overview, nw: 184, nh: 32)
 
@@ -1127,6 +1161,41 @@ final class AgentSessionReducerTests: XCTestCase {
         )
 
         XCTAssertEqual(session.displayTitle, "Investigate the loading issue in the Codex chat")
+    }
+
+    func testCodexSessionTitleUsesRuntimeNameBeforePreview() {
+        let session = AgentSession(
+            id: "codex:thread-native-title",
+            runtime: .codex,
+            provider: .openAI,
+            nativeSessionID: "thread-native-title",
+            workspace: URL(fileURLWithPath: "/tmp/ace"),
+            state: .idle,
+            model: nil,
+            latestActivity: nil,
+            pendingApproval: nil,
+            pendingUserInput: nil,
+            startedAt: Date(),
+            updatedAt: Date(),
+            metadata: [
+                "name": .string("Acesse o projeto Coucou"),
+                "preview": .string("A much longer original request"),
+            ]
+        )
+
+        XCTAssertEqual(session.displayTitle, "Acesse o projeto Coucou")
+    }
+
+    func testCodexActiveWriterErrorExplainsHowToContinue() {
+        let error = CodexAppServerError.server(
+            code: -32600,
+            message: "thread already has an active writer"
+        )
+
+        XCTAssertEqual(
+            error.errorDescription,
+            "This chat is already open in Codex Desktop. Continue it there, or close it there before resuming it in Coucou."
+        )
     }
 
     func testCodexSessionTitleSkipsAttachmentBoilerplate() {

@@ -162,10 +162,12 @@ final class CodexAgentRuntimeAdapter: AgentRuntimeAdapter, AgentRuntimeStatusRep
     func loadConversation(sessionID: String) async throws -> [AgentConversationMessage] {
         let nativeID = normalizedNativeID(sessionID)
         let result = try await connectedTransport().request(
-            method: "thread/read",
+            method: "thread/turns/list",
             params: .object([
                 "threadId": .string(nativeID),
-                "includeTurns": .bool(true),
+                "limit": .number(20),
+                "sortDirection": .string("desc"),
+                "itemsView": .string("summary"),
             ])
         )
         return await Task.detached(priority: .userInitiated) {
@@ -255,7 +257,14 @@ final class CodexAgentRuntimeAdapter: AgentRuntimeAdapter, AgentRuntimeStatusRep
     }
 
     nonisolated static func conversationMessages(from response: JSONValue) -> [AgentConversationMessage] {
-        let turns = response["thread"]?["turns"]?.arrayValue ?? []
+        let turns: [JSONValue]
+        if let page = response["data"]?.arrayValue {
+            // The recent-turn page is requested newest-first so it stays small. The UI reads
+            // conversations chronologically, therefore normalize it before extracting messages.
+            turns = Array(page.reversed())
+        } else {
+            turns = response["thread"]?["turns"]?.arrayValue ?? []
+        }
         return turns.flatMap { turn -> [AgentConversationMessage] in
             let timestamp = turn["startedAt"]?.numberValue.map(Date.init(timeIntervalSince1970:))
             return (turn["items"]?.arrayValue ?? []).compactMap { item in
