@@ -56,6 +56,33 @@ struct AgentTask: Identifiable, Equatable {
     var pillBadge: PillBadge? = nil  // alert badge shown on pill when not focused
     var sessionCwd: String?  = nil  // last known working directory (Claude Code sessions)
     var agentSessionID: String? = nil // normalized runtime session represented by this pill
+
+    var statusLabel: String {
+        switch state {
+        case .idle: "Idle"
+        case .working: "Working"
+        case .thinking: "Thinking"
+        case .searching: "Searching"
+        case .approval: "Approval"
+        case .question: "Needs input"
+        case .error: "Failed"
+        case .finished: "Completed"
+        case .ratelimit: "Rate limited"
+        case .sleeping: "Sleeping"
+        case .dizzy: "Unavailable"
+        }
+    }
+
+    var statusColor: String {
+        switch state {
+        case .approval: "#F5A524"
+        case .question: "#22D3EE"
+        case .error, .ratelimit, .dizzy: "#F4505E"
+        case .finished: "#22C55E"
+        case .working, .thinking, .searching: color
+        case .idle, .sleeping: "#727781"
+        }
+    }
 }
 
 enum AgentSource: Equatable {

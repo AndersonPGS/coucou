@@ -67,6 +67,11 @@ struct OverviewView: View {
                                     .foregroundColor(Color(hex: "#8E939C"))
                                     .lineLimit(1)
                                     .fixedSize()
+                                Text(agent.statusLabel)
+                                    .font(.system(size: 9.5, weight: .semibold))
+                                    .foregroundColor(Color(hex: agent.statusColor))
+                                    .lineLimit(1)
+                                    .fixedSize()
                                 Spacer(minLength: 2)
                                 if agent.steps.count > 1 {
                                     Text("\(min(agent.stepIndex + 1, agent.steps.count))/\(agent.steps.count)")
@@ -92,7 +97,6 @@ struct OverviewView: View {
 
                 // ↗ jump button — last in ZStack so it renders on top; hidden while any detail is open
                 if !showingN8nDetail,
-                   agent?.source != .codex,
                    agent?.id != "integration_claude" {
                     Button(action: { openAgentTarget(agent) }) {
                         Image(systemName: "arrow.up.right")
@@ -140,10 +144,16 @@ struct OverviewView: View {
         case "integration_calcom":
             NSWorkspace.shared.open(URL(string: "https://app.cal.com/bookings")!)
         case "integration_codex":
-            break
+            if let sessionID = state.selectedAgentSessionID {
+                state.selectAgentSession(sessionID)
+                state.view = .agentSession
+            }
         default:
             // Non-integration real tasks
-            if task.source == .n8n {
+            if task.source == .codex, let sessionID = task.agentSessionID {
+                state.selectAgentSession(sessionID)
+                state.view = .agentSession
+            } else if task.source == .n8n {
                 if let urlStr = KeychainStore.shared.get("n8n-url"), let url = URL(string: urlStr) {
                     NSWorkspace.shared.open(url)
                 }
@@ -2251,7 +2261,7 @@ private struct AgentConversationBubble: View {
     var body: some View {
         HStack(alignment: .top) {
             if message.role == .user { Spacer(minLength: 72) }
-            Text(message.content)
+            Text(AgentConversationMarkdown.render(message.content))
                 .font(.system(size: 11.5))
                 .foregroundColor(message.role == .user ? Color(hex: "#F1F2F4") : Color(hex: "#BEC2C9"))
                 .textSelection(.enabled)
@@ -2263,6 +2273,30 @@ private struct AgentConversationBubble: View {
             if message.role != .user { Spacer(minLength: 28) }
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+enum AgentConversationMarkdown {
+    static func render(_ source: String) -> AttributedString {
+        guard var rendered = try? AttributedString(
+            markdown: source,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) else {
+            return AttributedString(source)
+        }
+
+        // Runtime output is untrusted. Preserve ordinary web links but strip file URLs and
+        // custom schemes so rendered Markdown cannot launch local apps or resources.
+        var unsafeLinkRanges: [Range<AttributedString.Index>] = []
+        for run in rendered.runs {
+            if let link = run.link, safeWebURL(link.absoluteString) == nil {
+                unsafeLinkRanges.append(run.range)
+            }
+        }
+        for range in unsafeLinkRanges {
+            rendered[range].link = nil
+        }
+        return rendered
     }
 }
 
@@ -3144,6 +3178,19 @@ struct TickerView: View {
 
     private let completedScale: CGFloat = 11.5 / 13   // 0.885 — matches completed font size
 
+    private var isCurrentStepActive: Bool {
+        switch task?.state {
+        case .working, .thinking, .searching:
+            true
+        default:
+            false
+        }
+    }
+
+    private var displayedCurrentPhase: Double {
+        task?.state == .finished ? 1 : rowBPhase
+    }
+
     var steps: [String] {
         let raw = task?.steps ?? []
         return raw.isEmpty ? ["No recent activity"] : raw
@@ -3154,18 +3201,22 @@ struct TickerView: View {
             Color.clear
 
             // Row A: completed row — always rendered at phase=1 + completedScale
-            TickerRowView(text: rowA, phase: 1.0)
+            TickerRowView(text: rowA, phase: 1.0, isActive: false)
                 .scaleEffect(completedScale, anchor: .leading)
                 .offset(x: -10, y: rowAOffset)
                 .opacity(rowAOpacity)
 
             // Row B: current step → animates diagonally up-left, phase 0→1, scale 1→completedScale
-            TickerRowView(text: rowB, phase: rowBPhase)
+            TickerRowView(
+                text: rowB,
+                phase: displayedCurrentPhase,
+                isActive: isCurrentStepActive
+            )
                 .scaleEffect(1 - rowBPhase * (1 - completedScale), anchor: .leading)
                 .offset(x: -rowBPhase * 10, y: rowBOffset)
 
             // Row C: incoming new step — slides in from below at phase=0
-            TickerRowView(text: rowC, phase: 0.0)
+            TickerRowView(text: rowC, phase: 0.0, isActive: isCurrentStepActive)
                 .offset(y: rowCOffset)
                 .opacity(rowCOpacity)
         }
@@ -3249,6 +3300,7 @@ struct TickerView: View {
 struct TickerRowView: View {
     let text: String
     let phase: Double   // 0 = current (shimmer, large), 1 = completed (dim, scaled down by caller)
+    let isActive: Bool
 
     var body: some View {
         HStack(spacing: 6) {
@@ -3267,13 +3319,15 @@ struct TickerRowView: View {
 
             // Text: shimmer fades out, dim completed text fades in (overlapping cross-fade)
             ZStack(alignment: .leading) {
-                TickerShimmerText(text: text)
-                    .opacity(max(0, 1 - phase * 1.6))
+                if isActive {
+                    TickerShimmerText(text: text)
+                        .opacity(max(0, 1 - phase * 1.6))
+                }
                 Text(text)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(Color(hex: "#6B7079"))
+                    .foregroundColor(Color(hex: phase >= 0.5 ? "#6B7079" : "#A7ABB3"))
                     .lineLimit(1).truncationMode(.tail)
-                    .opacity(min(1, max(0, phase * 2 - 0.4)))
+                    .opacity(isActive ? min(1, max(0, phase * 2 - 0.4)) : 1)
             }
         }
         .frame(height: 22, alignment: .leading)
@@ -3349,10 +3403,13 @@ struct AgentPillsView: View {
     }
 
     private func taskPriority(_ task: AgentTask) -> Int {
-        if task.pillBadge != nil { return 0 }
-        if task.agentSessionID != nil && task.state != .idle { return 1 }
-        if task.agentSessionID != nil { return 2 }
-        return 3
+        switch task.state {
+        case .approval, .question: return 0
+        case .working, .thinking, .searching: return 1
+        case .error, .ratelimit, .dizzy: return 2
+        case .finished: return 3
+        case .idle, .sleeping: return task.agentSessionID == nil ? 5 : 4
+        }
     }
 }
 
@@ -3393,6 +3450,10 @@ struct AgentPill: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .layoutPriority(1)
                         if task.agentSessionID != nil {
+                            Circle()
+                                .fill(Color(hex: task.statusColor))
+                                .frame(width: 5, height: 5)
+                                .help(task.statusLabel)
                             Image(systemName: "terminal.fill")
                                 .font(.system(size: 6.5, weight: .semibold))
                                 .foregroundColor(Color(hex: task.color).opacity(0.6))

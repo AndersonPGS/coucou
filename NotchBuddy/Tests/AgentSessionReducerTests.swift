@@ -820,6 +820,119 @@ final class AgentSessionReducerTests: XCTestCase {
         XCTAssertEqual(event?.kind, .cancelled)
     }
 
+    func testCompletedCodexTurnStopsWorkingState() {
+        let event = CodexAppServerEventTranslator.translate(
+            [
+                "method": "turn/completed",
+                "params": [
+                    "threadId": "thr_123",
+                    "turn": ["id": "turn_456", "status": "completed"],
+                ],
+            ]
+        )
+
+        XCTAssertEqual(event?.kind, .completed)
+
+        var session = AgentSession(
+            id: "codex:thr_123",
+            runtime: .codex,
+            provider: .openAI,
+            nativeSessionID: "thr_123",
+            workspace: nil,
+            state: .working,
+            model: nil,
+            latestActivity: nil,
+            pendingApproval: nil,
+            pendingUserInput: nil,
+            startedAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_000),
+            metadata: [:]
+        )
+        AgentSessionReducer.reduce(&session, event: try! XCTUnwrap(event))
+
+        XCTAssertEqual(session.state, .completed)
+        XCTAssertEqual(AgentTask(runtimeSession: session).state, .finished)
+    }
+
+    func testOverviewPrefersAttentionOverNewerWorkingSession() {
+        let working = makeOverviewSession(
+            id: "codex:working",
+            state: .working,
+            updatedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        var approval = makeOverviewSession(
+            id: "claude-code:approval",
+            state: .waitingForApproval,
+            updatedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        approval.pendingApproval = AgentApprovalRequest(
+            id: "approval-1",
+            title: "Run command",
+            detail: "swift test",
+            tool: nil,
+            choices: [.allow, .deny]
+        )
+
+        XCTAssertEqual(
+            preferredLiveAgentSession(in: [working, approval])?.id,
+            approval.id
+        )
+    }
+
+    func testOverviewUsesMostRecentlyUpdatedWorkingSession() {
+        let older = makeOverviewSession(
+            id: "gemini-cli:older",
+            state: .working,
+            updatedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let newer = makeOverviewSession(
+            id: "codex:newer",
+            state: .working,
+            updatedAt: Date(timeIntervalSince1970: 2_000)
+        )
+
+        XCTAssertEqual(preferredLiveAgentSession(in: [older, newer])?.id, newer.id)
+    }
+
+    func testOverviewDoesNotReplaceFocusWithInactiveHistory() {
+        let completed = makeOverviewSession(
+            id: "codex:completed",
+            state: .completed,
+            updatedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        let saved = makeOverviewSession(
+            id: "codex:saved",
+            state: .disconnected,
+            updatedAt: Date(timeIntervalSince1970: 3_000)
+        )
+
+        XCTAssertNil(preferredLiveAgentSession(in: [completed, saved]))
+    }
+
+    private func makeOverviewSession(
+        id: String,
+        state: AgentSessionState,
+        updatedAt: Date
+    ) -> AgentSession {
+        AgentSession(
+            id: id,
+            runtime: id.hasPrefix("claude-code:") ? .claudeCode :
+                id.hasPrefix("gemini-cli:") ? .geminiCLI : .codex,
+            provider: id.hasPrefix("claude-code:") ? .anthropic :
+                id.hasPrefix("gemini-cli:") ? .google : .openAI,
+            nativeSessionID: id,
+            workspace: nil,
+            state: state,
+            model: nil,
+            latestActivity: nil,
+            pendingApproval: nil,
+            pendingUserInput: nil,
+            startedAt: updatedAt,
+            updatedAt: updatedAt,
+            metadata: [:]
+        )
+    }
+
     func testClaudeToolEventTranslatesWithoutLeakingNativePayload() {
         let translation = ClaudeHookTranslator.translate(
             name: "PreToolUse",
@@ -1127,6 +1240,35 @@ final class AgentSessionReducerTests: XCTestCase {
 
         XCTAssertEqual(messages.map(\.id), ["user-old", "agent-new"])
         XCTAssertEqual(messages.map(\.content), ["Earlier prompt", "Newest reply"])
+    }
+
+    func testAgentConversationMarkdownRendersInlineFormattingAndPreservesLineBreaks() {
+        let rendered = AgentConversationMarkdown.render(
+            "First **bold** and *italic* with `code`.\nSecond line."
+        )
+
+        XCTAssertEqual(
+            String(rendered.characters),
+            "First bold and italic with code.\nSecond line."
+        )
+        XCTAssertTrue(rendered.runs.contains {
+            $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true
+        })
+        XCTAssertTrue(rendered.runs.contains {
+            $0.inlinePresentationIntent?.contains(.emphasized) == true
+        })
+        XCTAssertTrue(rendered.runs.contains {
+            $0.inlinePresentationIntent?.contains(.code) == true
+        })
+    }
+
+    func testAgentConversationMarkdownKeepsOnlySafeWebLinks() {
+        let rendered = AgentConversationMarkdown.render(
+            "[Web](https://example.com) [Local](file:///tmp/private.txt)"
+        )
+
+        XCTAssertTrue(rendered.runs.contains { $0.link?.absoluteString == "https://example.com" })
+        XCTAssertFalse(rendered.runs.contains { $0.link?.scheme == "file" })
     }
 
     func testCompactIslandOnlyAddsSmallRuntimeIndicatorWidth() {

@@ -341,6 +341,12 @@ final class AppState: ObservableObject {
         if selectedAgentSessionID.flatMap({ sessions[$0] }) == nil {
             selectedAgentSessionID = orderedSessions.first?.id
         }
+        if let highlighted = preferredLiveAgentSession(in: Array(sessions.values)),
+           let highlightedTask = tasks.first(where: { $0.agentSessionID == highlighted.id }) {
+            // Keep the chat explicitly opened by the user selected, while independently
+            // promoting the session that currently needs attention on the overview.
+            focusId = highlightedTask.id
+        }
         if let focusId, tasks.contains(where: { $0.id == focusId }) == false {
             self.focusId = selectedAgentSessionID
                 .flatMap { selectedID in tasks.first(where: { $0.agentSessionID == selectedID })?.id }
@@ -405,6 +411,39 @@ final class AppState: ObservableObject {
         syncMode()
     }
 
+}
+
+func agentSessionOverviewPriority(_ session: AgentSession) -> Int {
+    if session.pendingApproval != nil || session.pendingUserInput != nil {
+        return 0
+    }
+    switch session.state {
+    case .waitingForApproval, .waitingForUser: return 0
+    case .working, .starting: return 1
+    case .failed: return 2
+    case .completed: return 3
+    case .idle: return 4
+    case .cancelled, .disconnected: return 5
+    }
+}
+
+func preferredLiveAgentSession(in sessions: [AgentSession]) -> AgentSession? {
+    sessions
+        .filter {
+            $0.pendingApproval != nil
+                || $0.pendingUserInput != nil
+                || $0.state == .waitingForApproval
+                || $0.state == .waitingForUser
+                || $0.state == .working
+                || $0.state == .starting
+        }
+        .sorted {
+            let lhsPriority = agentSessionOverviewPriority($0)
+            let rhsPriority = agentSessionOverviewPriority($1)
+            if lhsPriority != rhsPriority { return lhsPriority < rhsPriority }
+            return $0.updatedAt > $1.updatedAt
+        }
+        .first
 }
 
 extension AgentTask {
