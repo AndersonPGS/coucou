@@ -202,13 +202,13 @@ struct SettingsView: View {
 
     private var sectionTitle: String {
         switch selectedSection {
-        case "general":      return "General"
-        case "activepills":  return "Active pills"
-        case "agents":       return "Agents"
-        case "chat":         return "Chat"
-        case "integrations": return "Integrations"
-        case "shortcuts":    return "Shortcuts"
-        default:             return "General"
+        case "general":      return String(localized: "General")
+        case "activepills":  return String(localized: "Active pills")
+        case "agents":       return String(localized: "Agents")
+        case "chat":         return String(localized: "Chat")
+        case "integrations": return String(localized: "Integrations")
+        case "shortcuts":    return String(localized: "Shortcuts")
+        default:             return String(localized: "General")
         }
     }
 
@@ -294,6 +294,47 @@ struct SettingsView: View {
             Toggle("Launch at Mac startup", isOn: $launchAtStartup)
                 .onChange(of: launchAtStartup) { _, on in toggleStartup(on) }
                 .padding(6)
+        }
+
+        GroupBox(String(localized: "Language")) {
+            VStack(alignment: .leading, spacing: 10) {
+                Picker("", selection: $state.appLanguage) {
+                    Text(String(localized: "System")).tag("")
+                    Text("English").tag("en")
+                    Text("简体中文").tag("zh-Hans")
+                    Text("हिन्दी").tag("hi")
+                    Text("Español").tag("es")
+                    Text("العربية").tag("ar")
+                    Text("Français").tag("fr")
+                    Text("বাংলা").tag("bn")
+                    Text("Português (Brasil)").tag("pt-BR")
+                    Text("Русский").tag("ru")
+                    Text("Indonesia").tag("id")
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .onChange(of: state.appLanguage) { _, code in
+                    if code.isEmpty {
+                        UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+                    } else {
+                        UserDefaults.standard.set([code], forKey: "AppleLanguages")
+                    }
+                    UserDefaults.standard.synchronize()
+                }
+                HStack(spacing: 8) {
+                    Button(String(localized: "Restart Coucou")) {
+                        let url = Bundle.main.bundleURL
+                        let config = NSWorkspace.OpenConfiguration()
+                        NSWorkspace.shared.openApplication(at: url, configuration: config, completionHandler: nil)
+                        NSApp.terminate(nil)
+                    }
+                    .buttonStyle(.bordered)
+                    Text(String(localized: "Applies on next launch"))
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(6)
         }
 
         #if PHONE_LINK
@@ -1296,7 +1337,7 @@ struct SettingsSidebarRow: View {
 
     var body: some View {
         Label {
-            Text(title)
+            Text(LocalizedStringKey(title))
         } icon: {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .semibold))
