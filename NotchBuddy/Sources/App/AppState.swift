@@ -218,8 +218,10 @@ final class AppState: ObservableObject {
         }
     }
 
-    // Selected app language ("" = System, else BCP-47 code e.g. "fr")
-    @Published var appLanguage: String = UserDefaults.standard.stringArray(forKey: "AppleLanguages")?.first ?? ""
+    // Selected app language ("" = System, else BCP-47 code e.g. "fr").
+    // Keep this separate from AppleLanguages: UserDefaults also exposes the
+    // system-wide value there, which is not an app-specific selection.
+    @Published var appLanguage: String = UserDefaults.standard.string(forKey: "CoucouAppLanguage") ?? ""
 
     // Context for prompt (window attach / file)
     @Published var promptContext: PromptContext? = nil

@@ -315,8 +315,10 @@ struct SettingsView: View {
                 .labelsHidden()
                 .onChange(of: state.appLanguage) { _, code in
                     if code.isEmpty {
+                        UserDefaults.standard.removeObject(forKey: "CoucouAppLanguage")
                         UserDefaults.standard.removeObject(forKey: "AppleLanguages")
                     } else {
+                        UserDefaults.standard.set(code, forKey: "CoucouAppLanguage")
                         UserDefaults.standard.set([code], forKey: "AppleLanguages")
                     }
                     UserDefaults.standard.synchronize()
@@ -325,8 +327,13 @@ struct SettingsView: View {
                     Button(String(localized: "Restart Coucou")) {
                         let url = Bundle.main.bundleURL
                         let config = NSWorkspace.OpenConfiguration()
-                        NSWorkspace.shared.openApplication(at: url, configuration: config, completionHandler: nil)
-                        NSApp.terminate(nil)
+                        config.createsNewApplicationInstance = true
+                        NSWorkspace.shared.openApplication(at: url, configuration: config) { _, error in
+                            guard error == nil else { return }
+                            DispatchQueue.main.async {
+                                NSApp.terminate(nil)
+                            }
+                        }
                     }
                     .buttonStyle(.bordered)
                     Text(String(localized: "Applies on next launch"))
