@@ -450,12 +450,22 @@ final class IslandWindowController: NSWindowController {
                     finishDrag()
                 } else {
                     self.attachDragStart = nil
-                    if hadPendingClick && self.state.mode != .expanded {
-                        if self.fsm.state == .home {
-                            // FSM already thinks it's open (e.g. the view folded it): just reopen.
-                            self.expand(to: self.defaultView())
-                        } else {
-                            self.fsm.click()   // FSM petit/hidden→home; onTransition calls expand(to:)
+                    if hadPendingClick {
+                        if self.state.mode == .expanded,
+                           isIslandTopCenterToggleHit(
+                               point: event.locationInWindow,
+                               panelSize: self.window?.frame.size ?? .zero,
+                               notchWidth: self.notchW,
+                               notchHeight: self.notchH
+                           ) {
+                            self.collapse()
+                        } else if self.state.mode != .expanded {
+                            if self.fsm.state == .home {
+                                // FSM already thinks it's open (e.g. the view folded it): just reopen.
+                                self.expand(to: self.defaultView())
+                            } else {
+                                self.fsm.click()   // FSM petit/hidden→home; onTransition calls expand(to:)
+                            }
                         }
                     }
                 }
@@ -817,6 +827,26 @@ final class IslandWindowController: NSWindowController {
     nonisolated func cleanup() {
         // Called explicitly before release if needed
     }
+}
+
+/// The quiet strip around the physical notch is the island's open/close handle.
+/// Keeping it narrow avoids stealing clicks from header controls and content.
+func isIslandTopCenterToggleHit(
+    point: CGPoint,
+    panelSize: CGSize,
+    notchWidth: CGFloat,
+    notchHeight: CGFloat
+) -> Bool {
+    guard panelSize.width > 0, panelSize.height > 0 else { return false }
+    let handleWidth = max(176, notchWidth)
+    let handleHeight = max(36, notchHeight + 12)
+    let handle = CGRect(
+        x: (panelSize.width - handleWidth) / 2,
+        y: panelSize.height - handleHeight,
+        width: handleWidth,
+        height: handleHeight
+    )
+    return handle.contains(point)
 }
 
 // MARK: - IslandPanel

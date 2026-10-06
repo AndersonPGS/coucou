@@ -1285,6 +1285,35 @@ final class AgentSessionReducerTests: XCTestCase {
         XCTAssertEqual(size.1, IslandConst.hiddenPeekHeight)
     }
 
+    func testExpandedIslandTopCenterActsAsCollapseHandle() {
+        let panel = CGSize(width: 720, height: 320)
+
+        XCTAssertTrue(
+            isIslandTopCenterToggleHit(
+                point: CGPoint(x: 360, y: 300),
+                panelSize: panel,
+                notchWidth: 184,
+                notchHeight: 32
+            )
+        )
+        XCTAssertFalse(
+            isIslandTopCenterToggleHit(
+                point: CGPoint(x: 80, y: 300),
+                panelSize: panel,
+                notchWidth: 184,
+                notchHeight: 32
+            )
+        )
+        XCTAssertFalse(
+            isIslandTopCenterToggleHit(
+                point: CGPoint(x: 360, y: 240),
+                panelSize: panel,
+                notchWidth: 184,
+                notchHeight: 32
+            )
+        )
+    }
+
     func testCodexSessionTitleUsesPreviewBeforeWorkspaceName() {
         let session = AgentSession(
             id: "codex:thread-title",
